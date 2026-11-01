@@ -264,6 +264,10 @@ def test_decimal_values_are_formatted() -> None:
 #       for(const x of v) o[f][x]=format(f)(x);}
 #     console.log(JSON.stringify(o));'
 #
+# The ``+,`` row is the output of ``+,d`` rather than ``+,``: the frontend
+# registers ``+,`` as a shim for ``NumberFormats.INTEGER_SIGNED`` in
+# ``setupFormatters.ts``, so that is what the browser renders.
+#
 # One intentional deviation: d3 emits a Unicode minus (U+2212); the Python helper
 # emits an ASCII "-" for email/CSV safety, so the comparison normalizes it.
 
@@ -392,14 +396,14 @@ EXPECTED: dict[str, list[str]] = {
         "1,000.000",
     ],  # noqa: E501
     "+,": [
-        "+12,345.432",
+        "+12,345",
         "+0",
         "+4,725",
         "+80,679,663",
         "+1,234,567,890",
-        "−1,234.5",
-        "+0.0123",
-        "+999.9",
+        "−1,235",
+        "+0",
+        "+1,000",
         "+1,000",
     ],  # noqa: E501
     "$,.2f": [
@@ -469,7 +473,8 @@ def test_matches_frontend_d3_format(d3_format: str) -> None:
         (",", -1234.5, "-1,234.5"),
         ("+,", 4725.0, "+4,725"),
         ("+,", 1000.0, "+1,000"),
-        ("+,", -1234.5, "-1,234.5"),
+        # ``+,`` is a frontend shim for ``+,d``, so the fraction is rounded away
+        ("+,", -1234.5, "-1,235"),
     ],
 )
 def test_default_format_matches_d3_for_floats(
@@ -588,6 +593,41 @@ def test_unsupported_d3_padding_is_explicitly_rejected(d3_format: str) -> None:
     with pytest.raises(ValueError, match="padding"):
         format_d3(d3_format, 1234.5)
     assert format_number_with_config(d3_format, None, 1234.5) == "1234.5"
+
+
+# The frontend registers shims for deprecated or mistyped format strings in
+# ``setupFormatters.ts``, so a chart saved with one renders through the shim's
+# target format. Each expected value is d3-format's output for that target.
+@pytest.mark.parametrize(
+    "d3_format,value,expected",
+    [
+        ("%", 0.256, "26%"),
+        ("0%", 0.256, "26%"),
+        (",%", 12345.432, "1,234,543%"),
+        ("f", 12345.432, "12,345"),
+        (",f", 12345.432, "12,345"),
+        ("int", -1234.5, "-1,235"),
+        (",0", 12345.432, "12,345.432"),
+        ("null", 12345.432, "12,345.432"),
+        (",r", 0.5, "0.5000"),
+        (".1%f", 0.256, "25.6%"),
+        ("$,.0", 12345.432, "$12,345"),
+        ("$,.1", 12345.432, "$12,345.4"),
+        ("$,0", 0.5, "$0.5000"),
+        ("+,", 12345.432, "+12,345"),
+    ],
+)
+def test_legacy_format_aliases_match_frontend_shims(
+    d3_format: str, value: float, expected: str
+) -> None:
+    assert format_number_with_config(d3_format, None, value) == expected
+
+
+def test_legacy_format_alias_resolves_after_currency_strips_dollar() -> None:
+    # ``CurrencyFormatter`` removes ``$`` before the registry lookup, so ``$,f``
+    # resolves through the ``,f`` shim.
+    currency = {"symbol": "USD", "symbolPosition": "prefix"}
+    assert format_number_with_config("$,f", currency, 12345.432) == "$ 12,345"
 
 
 @pytest.mark.parametrize(

@@ -23,7 +23,8 @@ have no access to the frontend formatters, so chart number/currency format
 configuration has to be reproduced here to render the same values an end user
 sees in the browser.
 
-Only d3-format specifiers (and the ``SMART_NUMBER`` pseudo-formats) are ported.
+Only d3-format specifiers (and the ``SMART_NUMBER`` pseudo-formats) are ported,
+along with the frontend's aliases for deprecated or mistyped format strings.
 The duration, memory, and length formatters depend on separate frontend
 factories and are explicitly rejected, causing the public wrapper to preserve
 the raw value rather than silently misformat it. The fill/align/zero/width d3
@@ -62,6 +63,46 @@ UNSUPPORTED_FRONTEND_PRESETS: frozenset[str] = frozenset(
         "LENGTH_CM_M",
     }
 )
+
+# Deprecated or mistyped format strings that the frontend number formatter
+# registry answers with a working formatter instead of parsing them as d3
+# specifiers. Mirrors the shims registered in
+# ``superset-frontend/src/setup/setupFormatters.ts``; ``,d`` and ``+,d`` are
+# ``NumberFormats.INTEGER`` and ``NumberFormats.INTEGER_SIGNED``.
+LEGACY_NUMBER_FORMAT_ALIASES: dict[str, str] = {
+    ",0": ",.4~f",
+    "null": ",.4~f",
+    "%": ".0%",
+    ".": ".4~f",
+    ",f": ",d",
+    ",r": ",.4f",
+    "0f": ",d",
+    ",#": ",.4~f",
+    "$,f": "$,d",
+    "0%": ".0%",
+    "f": ",d",
+    ",.": ",.4~f",
+    ".1%f": ".1%",
+    "1%": ".0%",
+    "3%": ".0%",
+    ",%": ",.0%",
+    ".r": ".4~f",
+    "$,.0": "$,d",
+    "$,.1": "$,.1~f",
+    ",0s": ",.4~f",
+    "%%%": ".0%",
+    ",0f": ",d",
+    "+,%": "+,.0%",
+    "$f": "$,d",
+    "+,": "+,d",
+    ",2f": ",.4~f",
+    ",g": ",.4~f",
+    "int": ",d",
+    ".0%f": ".1%",
+    "$,0": "$,.4f",
+    "$,0f": "$,.4f",
+    "$,.f": "$,.4f",
+}
 
 DEFAULT_LOCALE: str = "en"
 CURRENCY_SYMBOL_LOCALE: str = "en_US"
@@ -217,9 +258,13 @@ def format_numeric(d3_format: str, value: float) -> str:
     Delegates to the port of ``createSmartNumberFormatter.ts`` for the two smart
     pseudo-formats and to the port of ``d3-format/src/locale.js`` for d3
     specifiers. Registered frontend-only factories are rejected explicitly.
+    A legacy alias is first replaced by the format the frontend registry maps
+    it to, as ``NumberFormatterRegistry.get`` returns a registered formatter
+    before parsing the string as a d3 specifier.
 
     :return: a formatted number string
     """
+    d3_format = LEGACY_NUMBER_FORMAT_ALIASES.get(d3_format, d3_format)
     if d3_format in UNSUPPORTED_FRONTEND_PRESETS:
         raise ValueError(f"Frontend preset {d3_format!r} is not available in reports")
     if d3_format in (SMART_NUMBER, SMART_NUMBER_SIGNED):
@@ -645,49 +690,21 @@ D3_FORMAT_VALIDATION_RE: re.Pattern[str] = re.compile(
 #     NumberFormats.ts (SMART_NUMBER, SMART_NUMBER_SIGNED, OVER_MAX_HIDDEN)
 #   - superset-frontend/src/setup/setupFormatters.ts (the registered named
 #     formatters -- already enumerated by UNSUPPORTED_FRONTEND_PRESETS, plus the
-#     throughput formatters -- and the "deprecated or common typo" shims)
+#     throughput formatters -- and the "deprecated or common typo" shims, kept
+#     in LEGACY_NUMBER_FORMAT_ALIASES)
 #   - superset-frontend/src/explore/controls.tsx (D3_FORMAT_OPTIONS)
-NAMED_NUMBER_FORMATS: frozenset[str] = UNSUPPORTED_FRONTEND_PRESETS | frozenset(
-    {
-        SMART_NUMBER,
-        SMART_NUMBER_SIGNED,
-        OVER_MAX_HIDDEN,
-        "NETWORK_THROUGHPUT",
-        "NETWORK_THROUGHPUT_FROM_BYTES",
-        # deprecated / common-typo shims (setupFormatters.ts)
-        ",0",
-        "null",
-        "%",
-        ".",
-        ",f",
-        ",r",
-        "0f",
-        ",#",
-        "$,f",
-        "0%",
-        "f",
-        ",.",
-        ".1%f",
-        "1%",
-        "3%",
-        ",%",
-        ".r",
-        "$,.0",
-        "$,.1",
-        ",0s",
-        "%%%",
-        ",0f",
-        "+,%",
-        "$f",
-        "+,",
-        ",2f",
-        ",g",
-        "int",
-        ".0%f",
-        "$,0",
-        "$,0f",
-        "$,.f",
-    }
+NAMED_NUMBER_FORMATS: frozenset[str] = (
+    UNSUPPORTED_FRONTEND_PRESETS
+    | frozenset(LEGACY_NUMBER_FORMAT_ALIASES)
+    | frozenset(
+        {
+            SMART_NUMBER,
+            SMART_NUMBER_SIGNED,
+            OVER_MAX_HIDDEN,
+            "NETWORK_THROUGHPUT",
+            "NETWORK_THROUGHPUT_FROM_BYTES",
+        }
+    )
 )
 
 
